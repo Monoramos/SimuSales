@@ -10,7 +10,7 @@ const DIFFICULTY_CONFIG = {
   unwinnable: { label: "Unwinnable", color: "#ef4444", bg: "#1c0000" },
 };
 
-// ─── Persona Selector Screen ──────────────────────────────────────────────────
+// ─── Persona Selector ─────────────────────────────────────────────────────────
 function PersonaSelector({ onSelect }) {
   const [personas, setPersonas] = useState([]);
   const [hovered, setHovered] = useState(null);
@@ -19,10 +19,7 @@ function PersonaSelector({ onSelect }) {
   useEffect(() => {
     fetch("http://localhost:3001/personas")
       .then((r) => r.json())
-      .then((data) => {
-        setPersonas(data);
-        setLoading(false);
-      })
+      .then((data) => { setPersonas(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
@@ -36,19 +33,15 @@ function PersonaSelector({ onSelect }) {
 
   return (
     <div style={styles.selectorContainer}>
-      {/* Header */}
       <div style={styles.selectorHeader}>
         <h1 style={styles.selectorTitle}>SimuSales</h1>
         <p style={styles.selectorSubtitle}>Choose your prospect</p>
         <p style={styles.selectorHint}>Each conversation is a live simulation. Pick your challenge.</p>
       </div>
-
-      {/* Cards Grid */}
       <div style={styles.grid}>
         {personas.map((p) => {
           const diff = DIFFICULTY_CONFIG[p.difficulty] || DIFFICULTY_CONFIG.hard;
           const isHovered = hovered === p.key;
-
           return (
             <div
               key={p.key}
@@ -63,31 +56,17 @@ function PersonaSelector({ onSelect }) {
                 boxShadow: isHovered ? `0 8px 32px ${diff.color}22` : "none",
               }}
             >
-              {/* Emoji */}
               <div style={styles.cardEmoji}>{p.emoji}</div>
-
-              {/* Difficulty badge */}
-              <div style={{
-                ...styles.diffBadge,
-                color: diff.color,
-                borderColor: diff.color,
-              }}>
+              <div style={{ ...styles.diffBadge, color: diff.color, borderColor: diff.color }}>
                 {diff.label}
               </div>
-
-              {/* Name + title */}
               <h2 style={styles.cardName}>{p.name}</h2>
               <p style={styles.cardTitle}>{p.title}</p>
-
-              {/* Description */}
               <p style={styles.cardDesc}>{p.description}</p>
-
-              {/* Winnable indicator */}
               <div style={styles.cardFooter}>
                 {p.winnable
                   ? <span style={{ color: "#4ade80", fontSize: "0.75rem" }}>🏆 Winnable</span>
-                  : <span style={{ color: "#ef4444", fontSize: "0.75rem" }}>💀 Unwinnable</span>
-                }
+                  : <span style={{ color: "#ef4444", fontSize: "0.75rem" }}>💀 Unwinnable</span>}
               </div>
             </div>
           );
@@ -97,8 +76,76 @@ function PersonaSelector({ onSelect }) {
   );
 }
 
+// ─── End Screen ───────────────────────────────────────────────────────────────
+function EndScreen({ result, onTryAgain, onChangeProspect }) {
+  const { outcome, persona, overall, breakdown, summary, exchanges, enduranceMode } = result;
+  const won = outcome === "won";
+
+  const scoreColor = overall >= 80 ? "#4ade80" : overall >= 60 ? "#facc15" : overall >= 40 ? "#f97316" : "#ef4444";
+
+  const breakdownLabels = {
+    objectionHandling: "Objection Handling",
+    questionQuality:   "Question Quality",
+    conciseness:       "Conciseness",
+    adaptability:      "Adaptability",
+  };
+
+  return (
+    <div style={styles.endContainer}>
+      {/* Result header */}
+      <div style={styles.endHeader}>
+        <div style={styles.endIcon}>{won ? "🏆" : enduranceMode ? "💀" : "📋"}</div>
+        <h1 style={{ ...styles.endTitle, color: won ? "#4ade80" : enduranceMode ? "#ef4444" : "#facc15" }}>
+          {won ? "Deal Closed!" : enduranceMode ? "Endurance Complete" : "Session Ended"}
+        </h1>
+        <p style={styles.endPersona}>vs. {persona}</p>
+        <p style={styles.endExchanges}>{exchanges} exchange{exchanges !== 1 ? "s" : ""}</p>
+      </div>
+
+      {/* Overall score */}
+      <div style={styles.scoreCircle}>
+        <span style={{ ...styles.scoreNumber, color: scoreColor }}>{overall}</span>
+        <span style={styles.scoreMax}>/100</span>
+      </div>
+
+      {/* Breakdown */}
+      <div style={styles.breakdownContainer}>
+        {Object.entries(breakdown).map(([key, val]) => (
+          <div key={key} style={styles.breakdownRow}>
+            <span style={styles.breakdownLabel}>{breakdownLabels[key]}</span>
+            <div style={styles.barTrack}>
+              <div style={{
+                ...styles.barFill,
+                width: `${(val / 25) * 100}%`,
+                backgroundColor: val >= 20 ? "#4ade80" : val >= 15 ? "#facc15" : val >= 10 ? "#f97316" : "#ef4444",
+              }} />
+            </div>
+            <span style={styles.breakdownScore}>{val}/25</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Summary */}
+      <div style={styles.summaryCard}>
+        <p style={styles.summaryLabel}>Coach's Note</p>
+        <p style={styles.summaryText}>{summary}</p>
+      </div>
+
+      {/* Actions */}
+      <div style={styles.endActions}>
+        <button onClick={onTryAgain} style={styles.primaryBtn}>
+          🔄 Try Again
+        </button>
+        <button onClick={onChangeProspect} style={styles.secondaryBtn}>
+          ← Change Prospect
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Call Screen ──────────────────────────────────────────────────────────────
-function CallScreen({ persona, onExit }) {
+function CallScreen({ persona, onExit, onSessionEnd }) {
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -124,13 +171,11 @@ function CallScreen({ persona, onExit }) {
       onAIText: (text) => { setAiText(text); setStatus("ai_talking"); },
       onAudio: (arrayBuffer) => playAudio(arrayBuffer),
       onFeedback: (data) => showFeedback(data),
+      onSessionEnd: (data) => onSessionEnd(data),
       onError: (msg) => { setError(msg); setStatus("error"); },
     });
 
-    setTimeout(() => {
-      startMic();
-      setStatus("ready");
-    }, 500);
+    setTimeout(() => { startMic(); setStatus("ready"); }, 500);
 
     return () => {
       socketRef.current?.close();
@@ -139,6 +184,10 @@ function CallScreen({ persona, onExit }) {
       clearTimeout(feedbackTimerRef.current);
     };
   }, []);
+
+  const handleExit = () => {
+    socketRef.current?.sendEndSession();
+  };
 
   const showFeedback = (data) => {
     clearTimeout(feedbackTimerRef.current);
@@ -155,7 +204,6 @@ function CallScreen({ persona, onExit }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
       mediaRecorderRef.current = mediaRecorder;
-
       let headerChunk = null;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -202,15 +250,14 @@ function CallScreen({ persona, onExit }) {
     error: "❌ Error",
   }[status];
 
-  const feedbackBg    = { warning: "#7f1d1d", tip: "#1e3a5f", praise: "#14532d" };
+  const feedbackBg     = { warning: "#7f1d1d", tip: "#1e3a5f", praise: "#14532d" };
   const feedbackBorder = { warning: "#ef4444", tip: "#3b82f6", praise: "#22c55e" };
 
   return (
     <div style={styles.callContainer}>
-
       {/* Top bar */}
       <div style={styles.topBar}>
-        <button onClick={onExit} style={styles.exitBtn}>← Exit</button>
+        <button onClick={handleExit} style={styles.exitBtn}>← Exit & Score</button>
         <div style={styles.personaBadge}>
           <span>{persona.emoji}</span>
           <span style={{ fontWeight: "bold" }}>{persona.name}</span>
@@ -218,15 +265,13 @@ function CallScreen({ persona, onExit }) {
             {DIFFICULTY_CONFIG[persona.difficulty].label}
           </span>
         </div>
-        <div style={{ width: 60 }} /> {/* spacer */}
+        <div style={{ width: 100 }} />
       </div>
 
-      {/* Status */}
       <div style={{ ...styles.statusBadge, backgroundColor: statusColors[status] }}>
         {statusLabel}
       </div>
 
-      {/* Hold button */}
       <button
         onMouseDown={() => { isRecordingRef.current = true; setStatus("listening"); }}
         onMouseUp={() => { isRecordingRef.current = false; socketRef.current?.sendEndOfSpeech(); setStatus("ready"); }}
@@ -247,7 +292,6 @@ function CallScreen({ persona, onExit }) {
         🎤 Hold to Speak
       </button>
 
-      {/* Transcript */}
       {transcript && (
         <div style={styles.msgCard}>
           <p style={styles.msgLabel}>You said:</p>
@@ -255,7 +299,6 @@ function CallScreen({ persona, onExit }) {
         </div>
       )}
 
-      {/* AI response */}
       {aiText && (
         <div style={{ ...styles.msgCard, ...styles.aiMsgCard }}>
           <p style={styles.msgLabel}>{persona.name}:</p>
@@ -263,21 +306,15 @@ function CallScreen({ persona, onExit }) {
         </div>
       )}
 
-      {/* Error */}
-      {error && (
-        <div style={styles.errorCard}><p>{error}</p></div>
-      )}
+      {error && <div style={styles.errorCard}><p>{error}</p></div>}
 
-      {/* Feedback overlay */}
       {feedback && (
         <div style={{
           ...styles.feedbackBadge,
           backgroundColor: feedbackBg[feedback.category] ?? "#1a1a1a",
           borderColor: feedbackBorder[feedback.category] ?? "#555",
           opacity: feedbackVisible ? 1 : 0,
-          transform: feedbackVisible
-            ? "translate(-50%, 0)"
-            : "translate(-50%, 12px)",
+          transform: feedbackVisible ? "translate(-50%, 0)" : "translate(-50%, 12px)",
         }}>
           <span style={{ fontSize: "1.1rem" }}>{feedback.icon}</span>
           <span style={{ color: "#fff" }}>{feedback.message}</span>
@@ -289,16 +326,49 @@ function CallScreen({ persona, onExit }) {
 
 // ─── Root Component ───────────────────────────────────────────────────────────
 export default function VoiceChat() {
+  const [screen, setScreen] = useState("selector"); // selector | call | end
   const [selectedPersona, setSelectedPersona] = useState(null);
+  const [sessionResult, setSessionResult] = useState(null);
 
-  if (!selectedPersona) {
-    return <PersonaSelector onSelect={setSelectedPersona} />;
-  }
+  const handleSelect = (persona) => {
+    setSelectedPersona(persona);
+    setScreen("call");
+  };
 
-  return (
+  const handleSessionEnd = (data) => {
+    setSessionResult({ ...data, outcome: data.result });
+    setScreen("end");
+  };
+
+  const handleExit = () => {
+    // Exit without scoring — just go back to selector
+    setScreen("selector");
+  };
+
+  const handleTryAgain = () => {
+    setScreen("call");
+  };
+
+  const handleChangeProspect = () => {
+    setSelectedPersona(null);
+    setScreen("selector");
+  };
+
+  if (screen === "selector") return <PersonaSelector onSelect={handleSelect} />;
+
+  if (screen === "call") return (
     <CallScreen
       persona={selectedPersona}
-      onExit={() => setSelectedPersona(null)}
+      onExit={handleExit}
+      onSessionEnd={handleSessionEnd}
+    />
+  );
+
+  if (screen === "end") return (
+    <EndScreen
+      result={sessionResult}
+      onTryAgain={handleTryAgain}
+      onChangeProspect={handleChangeProspect}
     />
   );
 }
@@ -310,214 +380,122 @@ const styles = {
     minHeight: "100vh", backgroundColor: "#0a0a0a",
   },
   selectorContainer: {
-    minHeight: "100vh",
-    backgroundColor: "#0a0a0a",
-    padding: "3rem 2rem",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "2.5rem",
+    minHeight: "100vh", backgroundColor: "#0a0a0a",
+    padding: "3rem 2rem", display: "flex",
+    flexDirection: "column", alignItems: "center", gap: "2.5rem",
   },
-  selectorHeader: {
-    textAlign: "center",
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.5rem",
-  },
+  selectorHeader: { textAlign: "center", display: "flex", flexDirection: "column", gap: "0.5rem" },
   selectorTitle: {
-    fontSize: "3rem",
-    fontWeight: "900",
-    color: "#fff",
-    fontFamily: "Georgia, serif",
-    letterSpacing: "0.05em",
-    margin: 0,
+    fontSize: "3rem", fontWeight: "900", color: "#fff",
+    fontFamily: "Georgia, serif", letterSpacing: "0.05em", margin: 0,
   },
   selectorSubtitle: {
-    fontSize: "1rem",
-    color: "#888",
-    fontFamily: "monospace",
-    textTransform: "uppercase",
-    letterSpacing: "0.2em",
-    margin: 0,
+    fontSize: "1rem", color: "#888", fontFamily: "monospace",
+    textTransform: "uppercase", letterSpacing: "0.2em", margin: 0,
   },
-  selectorHint: {
-    fontSize: "0.85rem",
-    color: "#444",
-    fontFamily: "monospace",
-    margin: 0,
-  },
+  selectorHint: { fontSize: "0.85rem", color: "#444", fontFamily: "monospace", margin: 0 },
   grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-    gap: "1.25rem",
-    width: "100%",
-    maxWidth: "1100px",
+    display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+    gap: "1.25rem", width: "100%", maxWidth: "1100px",
   },
   card: {
-    border: "1px solid #222",
-    borderRadius: "16px",
-    padding: "1.75rem",
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.6rem",
+    border: "1px solid #222", borderRadius: "16px", padding: "1.75rem",
+    cursor: "pointer", transition: "all 0.2s ease",
+    display: "flex", flexDirection: "column", gap: "0.6rem",
   },
-  cardEmoji: {
-    fontSize: "2.5rem",
-    lineHeight: 1,
-  },
+  cardEmoji: { fontSize: "2.5rem", lineHeight: 1 },
   diffBadge: {
-    display: "inline-block",
-    padding: "0.2rem 0.7rem",
-    borderRadius: "999px",
-    border: "1px solid",
-    fontSize: "0.7rem",
-    fontFamily: "monospace",
-    fontWeight: "bold",
-    letterSpacing: "0.1em",
-    width: "fit-content",
-    textTransform: "uppercase",
+    display: "inline-block", padding: "0.2rem 0.7rem", borderRadius: "999px",
+    border: "1px solid", fontSize: "0.7rem", fontFamily: "monospace",
+    fontWeight: "bold", letterSpacing: "0.1em", width: "fit-content", textTransform: "uppercase",
   },
-  cardName: {
-    fontSize: "1.25rem",
-    fontWeight: "bold",
-    color: "#fff",
-    fontFamily: "Georgia, serif",
-    margin: 0,
-  },
-  cardTitle: {
-    fontSize: "0.8rem",
-    color: "#666",
-    fontFamily: "monospace",
-    margin: 0,
-    textTransform: "uppercase",
-    letterSpacing: "0.1em",
-  },
-  cardDesc: {
-    fontSize: "0.875rem",
-    color: "#aaa",
-    fontFamily: "monospace",
-    lineHeight: 1.6,
-    margin: 0,
-    flexGrow: 1,
-  },
-  cardFooter: {
-    paddingTop: "0.5rem",
-    borderTop: "1px solid #1a1a1a",
-    fontFamily: "monospace",
-  },
+  cardName: { fontSize: "1.25rem", fontWeight: "bold", color: "#fff", fontFamily: "Georgia, serif", margin: 0 },
+  cardTitle: { fontSize: "0.8rem", color: "#666", fontFamily: "monospace", margin: 0, textTransform: "uppercase", letterSpacing: "0.1em" },
+  cardDesc: { fontSize: "0.875rem", color: "#aaa", fontFamily: "monospace", lineHeight: 1.6, margin: 0, flexGrow: 1 },
+  cardFooter: { paddingTop: "0.5rem", borderTop: "1px solid #1a1a1a", fontFamily: "monospace" },
 
   // Call screen
   callContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    minHeight: "100vh",
-    backgroundColor: "#0a0a0a",
-    color: "#fff",
-    fontFamily: "monospace",
-    padding: "1.5rem 2rem 4rem",
-    gap: "1.5rem",
+    display: "flex", flexDirection: "column", alignItems: "center",
+    minHeight: "100vh", backgroundColor: "#0a0a0a", color: "#fff",
+    fontFamily: "monospace", padding: "1.5rem 2rem 4rem", gap: "1.5rem",
   },
-  topBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    maxWidth: "700px",
-  },
+  topBar: { display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", maxWidth: "700px" },
   exitBtn: {
-    background: "none",
-    border: "1px solid #333",
-    color: "#888",
-    padding: "0.4rem 0.9rem",
-    borderRadius: "8px",
-    cursor: "pointer",
-    fontFamily: "monospace",
-    fontSize: "0.85rem",
+    background: "none", border: "1px solid #333", color: "#888",
+    padding: "0.4rem 0.9rem", borderRadius: "8px", cursor: "pointer",
+    fontFamily: "monospace", fontSize: "0.85rem",
   },
-  personaBadge: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.5rem",
-    fontSize: "0.9rem",
-    color: "#ccc",
-  },
+  personaBadge: { display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem", color: "#ccc" },
   statusBadge: {
-    padding: "0.4rem 1.2rem",
-    borderRadius: "999px",
-    fontSize: "0.85rem",
-    fontWeight: "bold",
-    color: "#000",
-    transition: "background-color 0.3s ease",
+    padding: "0.4rem 1.2rem", borderRadius: "999px", fontSize: "0.85rem",
+    fontWeight: "bold", color: "#000", transition: "background-color 0.3s ease",
   },
   button: {
-    padding: "1rem 2.5rem",
-    borderRadius: "999px",
-    border: "none",
-    backgroundColor: "#4ade80",
-    color: "#000",
-    fontSize: "1rem",
-    fontWeight: "bold",
-    fontFamily: "monospace",
-    transition: "opacity 0.2s ease",
-    userSelect: "none",
+    padding: "1rem 2.5rem", borderRadius: "999px", border: "none",
+    backgroundColor: "#4ade80", color: "#000", fontSize: "1rem",
+    fontWeight: "bold", fontFamily: "monospace", transition: "opacity 0.2s ease", userSelect: "none",
   },
   msgCard: {
-    background: "#111",
-    border: "1px solid #222",
-    borderRadius: "12px",
-    padding: "1rem 1.5rem",
-    maxWidth: "600px",
-    width: "100%",
+    background: "#111", border: "1px solid #222", borderRadius: "12px",
+    padding: "1rem 1.5rem", maxWidth: "600px", width: "100%",
   },
-  aiMsgCard: {
-    borderColor: "#2a2a3a",
-    background: "#13131f",
-  },
-  msgLabel: {
-    fontSize: "0.7rem",
-    color: "#555",
-    textTransform: "uppercase",
-    letterSpacing: "0.15em",
-    marginBottom: "0.4rem",
-    margin: "0 0 0.4rem 0",
-  },
-  msgText: {
-    fontSize: "1rem",
-    lineHeight: "1.6",
-    margin: 0,
-    color: "#ddd",
-  },
+  aiMsgCard: { borderColor: "#2a2a3a", background: "#13131f" },
+  msgLabel: { fontSize: "0.7rem", color: "#555", textTransform: "uppercase", letterSpacing: "0.15em", margin: "0 0 0.4rem 0" },
+  msgText: { fontSize: "1rem", lineHeight: "1.6", margin: 0, color: "#ddd" },
   errorCard: {
-    background: "#1a0000",
-    border: "1px solid #ff4444",
-    borderRadius: "12px",
-    padding: "1rem 1.5rem",
-    color: "#ff4444",
-    fontSize: "0.9rem",
-    maxWidth: "600px",
-    width: "100%",
+    background: "#1a0000", border: "1px solid #ff4444", borderRadius: "12px",
+    padding: "1rem 1.5rem", color: "#ff4444", fontSize: "0.9rem", maxWidth: "600px", width: "100%",
   },
   feedbackBadge: {
-    position: "fixed",
-    bottom: "2rem",
-    left: "50%",
-    transform: "translate(-50%, 0)",
-    display: "flex",
-    alignItems: "center",
-    gap: "0.6rem",
-    padding: "0.75rem 1.5rem",
-    borderRadius: "999px",
-    border: "1px solid",
-    fontSize: "0.9rem",
-    fontWeight: "bold",
-    fontFamily: "monospace",
-    transition: "opacity 0.4s ease, transform 0.4s ease",
-    pointerEvents: "none",
-    zIndex: 100,
-    whiteSpace: "nowrap",
+    position: "fixed", bottom: "2rem", left: "50%",
+    transform: "translate(-50%, 0)", display: "flex", alignItems: "center",
+    gap: "0.6rem", padding: "0.75rem 1.5rem", borderRadius: "999px",
+    border: "1px solid", fontSize: "0.9rem", fontWeight: "bold",
+    fontFamily: "monospace", transition: "opacity 0.4s ease, transform 0.4s ease",
+    pointerEvents: "none", zIndex: 100, whiteSpace: "nowrap",
+  },
+
+  // End screen
+  endContainer: {
+    display: "flex", flexDirection: "column", alignItems: "center",
+    minHeight: "100vh", backgroundColor: "#0a0a0a", color: "#fff",
+    fontFamily: "monospace", padding: "3rem 2rem", gap: "2rem",
+  },
+  endHeader: { textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" },
+  endIcon: { fontSize: "3.5rem" },
+  endTitle: { fontSize: "2.5rem", fontWeight: "900", fontFamily: "Georgia, serif", margin: 0 },
+  endPersona: { fontSize: "0.9rem", color: "#666", margin: 0, textTransform: "uppercase", letterSpacing: "0.15em" },
+  endExchanges: { fontSize: "0.8rem", color: "#444", margin: 0 },
+  scoreCircle: {
+    display: "flex", alignItems: "baseline", gap: "0.25rem",
+    background: "#111", border: "1px solid #222", borderRadius: "999px",
+    padding: "1rem 2.5rem",
+  },
+  scoreNumber: { fontSize: "3.5rem", fontWeight: "900", fontFamily: "Georgia, serif" },
+  scoreMax: { fontSize: "1.2rem", color: "#444" },
+  breakdownContainer: { display: "flex", flexDirection: "column", gap: "0.75rem", width: "100%", maxWidth: "500px" },
+  breakdownRow: { display: "flex", alignItems: "center", gap: "0.75rem" },
+  breakdownLabel: { fontSize: "0.75rem", color: "#888", width: "160px", flexShrink: 0, textTransform: "uppercase", letterSpacing: "0.05em" },
+  barTrack: { flex: 1, height: "6px", backgroundColor: "#1a1a1a", borderRadius: "999px", overflow: "hidden" },
+  barFill: { height: "100%", borderRadius: "999px", transition: "width 0.6s ease" },
+  breakdownScore: { fontSize: "0.8rem", color: "#666", width: "40px", textAlign: "right" },
+  summaryCard: {
+    background: "#111", border: "1px solid #222", borderRadius: "12px",
+    padding: "1.25rem 1.5rem", maxWidth: "500px", width: "100%",
+  },
+  summaryLabel: { fontSize: "0.7rem", color: "#555", textTransform: "uppercase", letterSpacing: "0.15em", margin: "0 0 0.5rem 0" },
+  summaryText: { fontSize: "0.9rem", lineHeight: 1.7, color: "#ccc", margin: 0 },
+  endActions: { display: "flex", gap: "1rem", flexWrap: "wrap", justifyContent: "center" },
+  primaryBtn: {
+    padding: "0.9rem 2rem", borderRadius: "999px", border: "none",
+    backgroundColor: "#4ade80", color: "#000", fontSize: "1rem",
+    fontWeight: "bold", fontFamily: "monospace", cursor: "pointer",
+  },
+  secondaryBtn: {
+    padding: "0.9rem 2rem", borderRadius: "999px", border: "1px solid #333",
+    backgroundColor: "transparent", color: "#888", fontSize: "1rem",
+    fontFamily: "monospace", cursor: "pointer",
   },
 };
 
