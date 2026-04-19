@@ -1,15 +1,15 @@
 // ElevenLabs Text-to-Speech
-// Returns an ArrayBuffer of audio data (mp3)
+// Accepts a voiceId per call so each persona uses their own voice
 
-export async function textToSpeech(text) {
-  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+export async function textToSpeech(text, voiceId) {
+  const id = voiceId || process.env.ELEVENLABS_VOICE_ID;
 
-  if (!voiceId) {
-    throw new Error("ELEVENLABS_VOICE_ID is not set in your .env file");
+  if (!id) {
+    throw new Error("No ElevenLabs voice ID provided and ELEVENLABS_VOICE_ID is not set in .env");
   }
 
   const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${id}`,
     {
       method: "POST",
       headers: {
@@ -21,9 +21,9 @@ export async function textToSpeech(text) {
         text,
         model_id: "eleven_turbo_v2", // fastest model — best for real-time
         voice_settings: {
-          stability: 0.4,        // slightly lower = more expressive/human
+          stability: 0.4,
           similarity_boost: 0.8,
-          style: 0.3,            // adds character/emotion
+          style: 0.3,
           use_speaker_boost: true,
         },
       }),

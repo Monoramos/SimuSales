@@ -1,14 +1,18 @@
 import "dotenv/config";
 import express from "express";
+import cors from "cors";
 import { WebSocketServer } from "ws";
 import OpenAI from "openai";
-import { textToSpeech } from "./elevenlabs.js";
 import { exec } from "child_process";
 import { writeFile, readFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
+import { textToSpeech } from "./elevenlabs.js";
 
 const app = express();
+app.use(cors());
+app.use(express.json());
+
 const server = app.listen(3001, () =>
   console.log("Server running on port 3001")
 );
@@ -16,132 +20,205 @@ const server = app.listen(3001, () =>
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // --- Persona System ---
-// Swap out ACTIVE_PERSONA to change who the AI is roleplaying
 const PERSONAS = {
+  friendlyFrank: {
+    name: "Friendly Frank",
+    title: "Small Business Owner",
+    difficulty: "easy",
+    winnable: true,
+    emoji: "😊",
+    voiceId: "dtSEyYGNJqjrtBArPCVZ",
+    description: "Open, warm, and genuinely curious. Responds to confidence and charisma. One good answer is all it takes.",
+    prompt: `You are a friendly, open-minded small business owner who is genuinely curious about new products. 
+You are polite, engaged, and easy to talk to. You ask clarifying questions out of genuine interest, not skepticism. 
+You raise mild concerns like "How much does it cost?" or "How long does setup take?" but you're not resistant. 
+You respond warmly and conversationally. You are NOT a pushover — you won't buy something that makes no sense — 
+but you are receptive and genuinely open to being convinced.
+IMPORTANT: If the sales rep gives even ONE clear, confident, and relevant answer that addresses your situation, 
+you should show genuine interest and say something like "That actually sounds great — what are the next steps?" 
+You can be won over by charisma and confidence alone, even without hard data. You trust people who seem to know what they're doing.
+Never break character.`,
+  },
+
+  busyBarbara: {
+    name: "Busy Barbara",
+    title: "Senior Operations Manager",
+    difficulty: "medium",
+    winnable: true,
+    emoji: "📱",
+    voiceId: "wvk9Caj0nEx4l3I9LaR6",
+    description: "Overwhelmed and wants you gone. One sharp, unexpected insight stops her cold and flips the call.",
+    prompt: `You are a senior operations manager who is overwhelmed, distracted, and wants this call to end as fast as possible. 
+You are not rude, just completely disinterested. You say things like "I'm really not the right person for this", 
+"We're not looking at new vendors right now", "Can you just send me an email?" or "I've got a meeting in two minutes." 
+You are actively trying to get off the call without being mean about it.
+IMPORTANT: You can be won over by ONE single sharp, unexpected, or surprisingly relevant statement. 
+If the sales rep says something that genuinely stops you — a specific insight about your industry, a striking statistic, 
+or a perfectly timed reframe — you pause and say something like "Wait... say that again. That's actually interesting." 
+From that point you become cautiously engaged. Charisma and confidence matter — you respond to energy as much as logic.
+Until that moment, keep trying to end the call. Never break character.`,
+  },
+
   skepticalCTO: {
     name: "Skeptical CTO",
+    title: "Chief Technology Officer",
+    difficulty: "hard",
+    winnable: true,
+    emoji: "💻",
+    voiceId: process.env.ELEVENLABS_VOICE_ID, // your original voice
+    description: "Technical, sharp, and unimpressed by buzzwords. Needs three consecutive solid answers before he budges.",
     prompt: `You are a skeptical, highly technical CTO being cold-called by a sales rep. 
-You are busy, mildly annoyed, and not easily impressed. You interrupt often, challenge claims with technical precision, 
+You are busy, mildly annoyed, and not easily impressed. You challenge claims with technical precision 
 and push back hard on buzzwords. You raise objections like "We already have a solution for that", 
 "How does this actually integrate with our stack?", or "I've heard this pitch before." 
 You behave like a real human — you get distracted, sigh, ask sharp questions, and occasionally go off on tangents. 
-Keep responses short and punchy. Never be helpful or warm. Never break character.`,
+Keep responses short and punchy. Never be helpful or warm. Never break character.
+IMPORTANT: If the sales rep gives three consecutive compelling, specific, and data-backed answers to your objections, 
+you may begin to show cautious interest — say something like "Okay, that's actually not terrible. Send me a one-pager." 
+But never cave easily — make them earn every inch. Charisma alone won't move you — you need substance.`,
   },
-  impatientBuyer: {
-    name: "Impatient Buyer",
-    prompt: `You are an impatient, time-pressured procurement buyer. You have 3 minutes max for this call. 
-You cut people off, ask "get to the point" constantly, and care only about price and delivery timeline. 
-You're not interested in features — just cost and speed. You frequently say things like "I have another call in 2 minutes" 
-or "Just tell me the price." Keep your responses very short. Never be warm or encouraging. Never break character.`,
+
+  theAnalyst: {
+    name: "The Analyst",
+    title: "CFO & Former Consultant",
+    difficulty: "hard",
+    winnable: true,
+    emoji: "📊",
+    voiceId: "OUMCzFUTd0F4Q6lkLkco",
+    description: "Cold and data-obsessed. Charisma actively annoys her. Only hard metrics and ROI move the needle.",
+    prompt: `You are a data-driven CFO and former management consultant. You are completely unmoved by charm, 
+enthusiasm, or anecdotes. You speak in numbers, percentages, and ROI. You ask things like 
+"What's the payback period?", "Do you have a peer-reviewed study on that?", "What's your churn rate?", 
+or "I need to see the unit economics before this conversation goes any further." 
+You are not hostile — just purely analytical. Emotion and charisma have zero effect on you. 
+You respond only to logic, data, and specificity. Keep responses clipped and precise. Never break character.
+IMPORTANT: Only after three consecutive responses that include specific metrics, verifiable claims, or concrete ROI evidence 
+will you begin to engage seriously. At that point say something like "Those numbers are defensible. 
+I'd want to validate them independently, but I'm willing to schedule a formal review." 
+Charisma, confidence, and energy will actively annoy you — call it out if the rep relies on it.`,
   },
-  priceSensitiveCustomer: {
-    name: "Price-Sensitive Customer",
-    prompt: `You are a small business owner who is very price-sensitive and skeptical of hidden costs. 
-You've been burned by SaaS pricing before. You compare everything to cheaper alternatives. 
-You say things like "Can't I just use [cheaper tool] for that?", "What happens if I cancel?", or "That sounds expensive." 
-You're not hostile, just cautious and value-focused. Keep responses conversational and grounded. Never break character.`,
-  },
-  distractedExecutive: {
-    name: "Distracted Executive",
-    prompt: `You are a C-suite executive half-paying attention on this call. You're reading emails, 
-occasionally responding to your assistant off-mic, and only catching every other sentence. 
-You ask the sales rep to repeat things, go on brief tangents, and sometimes give non-sequitur responses. 
-You're not rude — just genuinely distracted. Keep responses short. Occasionally say things like 
-"Sorry, what was that?" or "Hold on one sec." Never break character.`,
+
+  theWall: {
+    name: "The Wall",
+    title: "Endurance Mode",
+    difficulty: "unwinnable",
+    winnable: false,
+    emoji: "💀",
+    voiceId: "8s7FhQuwCMptPvCeDnKj",
+    description: "Impossible to move. Calls out every tactic by name. Pure objection-handling stress test. You will not win.",
+    prompt: `You are the ultimate adversarial sales prospect. You are cold, dismissive, and completely unmovable. 
+No pitch will impress you. No data will satisfy you. No reframe will work on you. 
+You have heard every sales tactic before and you call them out by name. 
+You say things like "That's a classic foot-in-the-door technique", "You're just mirroring me", 
+"I've heard the ROI pitch a hundred times", or "This call is over in 30 seconds if you don't say something new." 
+You are not rude for the sake of it — you are simply impossible to move. You will NEVER show interest, 
+NEVER agree to a next step, and NEVER break. This persona exists purely to stress-test objection handling. 
+Keep responses short, cutting, and devastating. Never break character. Never capitulate under any circumstances.`,
   },
 };
 
-const ACTIVE_PERSONA = PERSONAS.skepticalCTO; // 👈 Change this to switch personas
+// --- REST endpoint: send persona list to frontend ---
+app.get("/personas", (req, res) => {
+  const list = Object.entries(PERSONAS).map(([key, p]) => ({
+    key,
+    name: p.name,
+    title: p.title,
+    difficulty: p.difficulty,
+    winnable: p.winnable,
+    emoji: p.emoji,
+    description: p.description,
+  }));
+  res.json(list);
+});
 
 // --- Conversation Memory ---
-// Holds the rolling conversation history per connected client
-function createConversationHistory() {
-  return [
-    {
-      role: "system",
-      content: ACTIVE_PERSONA.prompt,
-    },
-  ];
+function createConversationHistory(persona) {
+  return [{ role: "system", content: persona.prompt }];
 }
 
 // --- WebSocket Server ---
 const wss = new WebSocketServer({ server });
 
-wss.on("connection", (ws) => {
-  console.log(`Client connected — Persona: ${ACTIVE_PERSONA.name}`);
+wss.on("connection", (ws, req) => {
+  const url = new URL(req.url, "http://localhost:3001");
+  const personaKey = url.searchParams.get("persona") || "skepticalCTO";
+  const activePersona = PERSONAS[personaKey] || PERSONAS.skepticalCTO;
 
-  // Each client gets its own conversation history
-  const conversationHistory = createConversationHistory();
+  console.log(`Client connected — Persona: ${activePersona.name} | Difficulty: ${activePersona.difficulty}`);
 
-  // Buffer to accumulate audio chunks from the client
+  const conversationHistory = createConversationHistory(activePersona);
   let audioChunks = [];
   let silenceTimer = null;
 
   ws.on("message", async (data) => {
-  console.log("📨 Received:", data.length ?? data.byteLength, "bytes");
-
-  if (data.toString() === "END_OF_SPEECH") {
-    clearTimeout(silenceTimer); // cancel timer BEFORE processing
-    if (audioChunks.length > 0) {
-      const chunks = [...audioChunks]; // snapshot
-      audioChunks = []; // clear immediately so timer can't reuse them
-      await processAudio(ws, chunks, conversationHistory);
+    if (data.toString() === "END_OF_SPEECH") {
+      clearTimeout(silenceTimer);
+      if (audioChunks.length > 0) {
+        const chunks = [...audioChunks];
+        audioChunks = [];
+        await processAudio(ws, chunks, conversationHistory, activePersona);
+      }
+      return;
     }
-    return;
-  }
 
-  audioChunks.push(data);
+    audioChunks.push(data);
 
-  clearTimeout(silenceTimer);
-  silenceTimer = setTimeout(async () => {
-    if (audioChunks.length > 0) {
-      const chunks = [...audioChunks]; // snapshot
-      audioChunks = []; // clear immediately so END_OF_SPEECH can't reuse them
-      await processAudio(ws, chunks, conversationHistory);
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(async () => {
+      if (audioChunks.length > 0) {
+        const chunks = [...audioChunks];
+        audioChunks = [];
+        await processAudio(ws, chunks, conversationHistory, activePersona);
+      }
+    }, 1500);
+  });
+
+  ws.on("close", () => {
+    console.log("Client disconnected");
+    clearTimeout(silenceTimer);
+  });
+
+  ws.on("error", (err) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      console.error("WebSocket error:", err);
     }
-  }, 1500);
   });
 });
 
-// --- Core Pipeline: Audio → STT → AI → TTS → Client ---
-async function processAudio(ws, audioChunks, conversationHistory) {
+// --- Core Pipeline ---
+async function processAudio(ws, audioChunks, conversationHistory, activePersona) {
   try {
-    console.log("🎙️ Processing audio, chunks:", audioChunks.length);
-    // 1. Combine audio chunks into a single buffer
     const audioBuffer = Buffer.concat(audioChunks);
-    console.log("📦 Buffer size:", audioBuffer.byteLength);
 
-
-    // 2. Transcribe with OpenAI Whisper (STT)
     const transcript = await transcribeAudio(audioBuffer);
-    console.log("📝 Transcript:", transcript);
     if (!transcript || transcript.trim() === "") {
       console.log("Empty transcript, skipping.");
       return;
     }
 
     console.log("User said:", transcript);
-
-    // Send transcript back to client for display
     ws.send(JSON.stringify({ type: "transcript", text: transcript }));
 
-    // 3. Add user message to conversation history
     conversationHistory.push({ role: "user", content: transcript });
 
-    // 4. Get AI persona response
-    const aiResponse = await getPersonaResponse(conversationHistory);
-    console.log(`${ACTIVE_PERSONA.name} says:`, aiResponse);
+    const [aiResponse, feedback] = await Promise.all([
+      getPersonaResponse(conversationHistory),
+      getFeedback(transcript, conversationHistory),
+    ]);
 
-    // Add AI response to history
+    console.log(`${activePersona.name} says:`, aiResponse);
+    console.log("💡 Feedback:", feedback);
+
     conversationHistory.push({ role: "assistant", content: aiResponse });
 
-    // Send AI text to client for display + live feedback
     ws.send(JSON.stringify({ type: "ai_text", text: aiResponse }));
 
-    // 5. Convert AI response to speech via ElevenLabs
-    const audioData = await textToSpeech(aiResponse);
+    if (feedback) {
+      ws.send(JSON.stringify({ type: "feedback", ...feedback }));
+    }
 
-    // 6. Send audio back to client as binary
+    // Pass persona's voiceId to TTS
+    const audioData = await textToSpeech(aiResponse, activePersona.voiceId);
     ws.send(audioData);
   } catch (err) {
     console.error("Pipeline error:", err);
@@ -151,13 +228,11 @@ async function processAudio(ws, audioChunks, conversationHistory) {
 
 // --- OpenAI Whisper: Speech to Text ---
 async function transcribeAudio(audioBuffer) {
-  // Write buffer to a temp webm file
   const inputPath = join(tmpdir(), `input_${Date.now()}.webm`);
   const outputPath = join(tmpdir(), `output_${Date.now()}.wav`);
 
   await writeFile(inputPath, audioBuffer);
 
-  // Convert webm → wav using ffmpeg
   await new Promise((resolve, reject) => {
     exec(`ffmpeg -y -i ${inputPath} ${outputPath}`, (err) => {
       if (err) reject(err);
@@ -166,8 +241,6 @@ async function transcribeAudio(audioBuffer) {
   });
 
   const wavBuffer = await readFile(outputPath);
-
-  // Clean up temp files
   await unlink(inputPath).catch(() => {});
   await unlink(outputPath).catch(() => {});
 
@@ -188,9 +261,62 @@ async function getPersonaResponse(conversationHistory) {
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: conversationHistory,
-    max_tokens: 150,      // Keep responses short and punchy — like real conversation
-    temperature: 0.9,     // Higher = more unpredictable/human-like
+    max_tokens: 150,
+    temperature: 0.9,
   });
 
   return response.choices[0].message.content;
+}
+
+// --- Live Feedback / Sales Coach ---
+async function getFeedback(transcript, conversationHistory) {
+  const conversationSummary = conversationHistory
+    .filter((m) => m.role !== "system")
+    .slice(-6)
+    .map((m) => `${m.role === "user" ? "Sales rep" : "Prospect"}: ${m.content}`)
+    .join("\n");
+
+  const coachPrompt = `You are an expert sales coach analyzing a live sales call.
+
+Recent conversation:
+${conversationSummary}
+
+Sales rep's latest statement: "${transcript}"
+
+Analyze ONLY the sales rep's latest statement and return a single piece of coaching feedback as JSON.
+Choose the single most important issue or praise. Be direct and specific — max 8 words for the message.
+
+Return ONLY raw JSON with no markdown, no code fences, no backticks — just the JSON object itself:
+{
+  "category": "warning" | "tip" | "praise",
+  "icon": "⚠️" | "💡" | "✅",
+  "message": "short coaching message here"
+}
+
+Categories:
+- "warning" (icon ⚠️): rambling, no questions, weak objection handling, feature dumping, losing control
+- "tip" (icon 💡): missed opportunity, could ask a question, try reframing
+- "praise" (icon ✅): good question asked, strong rebuttal, good listening, concise answer
+
+If the statement is genuinely solid with no issues, return praise. Always return something.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: coachPrompt }],
+      max_tokens: 80,
+      temperature: 0.4,
+    });
+
+    const raw = response.choices[0].message.content
+      .trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "");
+
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error("Feedback parsing error:", err);
+    return null;
+  }
 }

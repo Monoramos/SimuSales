@@ -1,22 +1,20 @@
 // Reusable WebSocket connection manager
-// Handles connection, message routing, and reconnection
+// Accepts a persona key and passes it to the server as a query param
 
-export function createSocket({ onTranscript, onAIText, onAudio, onError }) {
-  const socket = new WebSocket("ws://localhost:3001");
-  socket.binaryType = "arraybuffer"; // important: receive audio as ArrayBuffer
+export function createSocket({ personaKey, onTranscript, onAIText, onAudio, onFeedback, onError }) {
+  const socket = new WebSocket(`ws://localhost:3001?persona=${personaKey}`);
+  socket.binaryType = "arraybuffer";
 
   socket.onopen = () => {
-    console.log("✅ Connected to SimuSales server");
+    console.log(`✅ Connected — Persona: ${personaKey}`);
   };
 
   socket.onmessage = async (event) => {
-    // Binary = audio from ElevenLabs
     if (event.data instanceof ArrayBuffer) {
       onAudio && onAudio(event.data);
       return;
     }
 
-    // Otherwise it's a JSON message (transcript, ai_text, error)
     try {
       const msg = JSON.parse(event.data);
 
@@ -24,6 +22,8 @@ export function createSocket({ onTranscript, onAIText, onAudio, onError }) {
         onTranscript && onTranscript(msg.text);
       } else if (msg.type === "ai_text") {
         onAIText && onAIText(msg.text);
+      } else if (msg.type === "feedback") {
+        onFeedback && onFeedback(msg);
       } else if (msg.type === "error") {
         onError && onError(msg.message);
       }
@@ -33,22 +33,23 @@ export function createSocket({ onTranscript, onAIText, onAudio, onError }) {
   };
 
   socket.onerror = (err) => {
-    console.error("WebSocket error:", err);
-    onError && onError("Connection error");
+  // Ignore transient errors during initial connection handshake
+    if (socket.readyState === WebSocket.OPEN) {
+      console.error("WebSocket error:", err);
+      onError && onError("Connection error");
+    }
   };
 
   socket.onclose = () => {
     console.log("🔌 Disconnected from server");
   };
 
-  // Helper to send audio chunks
   socket.sendAudio = (chunk) => {
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(chunk);
     }
   };
 
-  // Helper to signal end of speech
   socket.sendEndOfSpeech = () => {
     if (socket.readyState === WebSocket.OPEN) {
       socket.send("END_OF_SPEECH");
