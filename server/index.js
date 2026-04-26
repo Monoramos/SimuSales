@@ -421,9 +421,9 @@ async function transcribeAudio(audioBuffer) {
   await writeFile(inputPath, audioBuffer);
 
   await new Promise((resolve, reject) => {
-    exec(`ffmpeg -y -i ${inputPath} ${outputPath}`, (err) => {
-      if (err) reject(err);
-      else resolve();
+  exec(`which ffmpeg && ffmpeg -y -i ${inputPath} ${outputPath}`, (err, stdout, stderr) => {
+    if (err) reject(new Error(stderr));
+    else resolve();
     });
   });
 
