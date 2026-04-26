@@ -21,9 +21,6 @@ export function createSocket({ personaKey, onTranscript, onAIText, onAudio, onFe
       else if (msg.type === "ai_text") onAIText && onAIText(msg.text);
       else if (msg.type === "feedback") onFeedback && onFeedback(msg);
       else if (msg.type === "session_end") onSessionEnd && onSessionEnd(msg);
-      else if (msg.type === "warning") {
-        onFeedback && onFeedback({ category: "warning", icon: "⚠️", message: msg.message });
-      }
       else if (msg.type === "error")   onError && onError(msg.message);
     } catch (err) {
       console.error("Failed to parse server message:", err);

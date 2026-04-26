@@ -80,9 +80,6 @@ function PersonaSelector({ onSelect }) {
 function EndScreen({ result, onTryAgain, onChangeProspect }) {
   const { outcome, persona, overall, breakdown, summary, exchanges, enduranceMode } = result;
   const won = outcome === "won";
-  const title = won ? "Deal Closed!" :
-              outcome === "limit_reached" ? "Session Complete" :
-              enduranceMode ? "Endurance Complete" : "Session Ended";
 
   const scoreColor = overall >= 80 ? "#4ade80" : overall >= 60 ? "#facc15" : overall >= 40 ? "#f97316" : "#ef4444";
 
@@ -98,8 +95,8 @@ function EndScreen({ result, onTryAgain, onChangeProspect }) {
       {/* Result header */}
       <div style={styles.endHeader}>
         <div style={styles.endIcon}>{won ? "🏆" : enduranceMode ? "💀" : "📋"}</div>
-        <h1 style={{ ...styles.endTitle, color: won ? "#4ade80" : outcome === "limit_reached" ? "#60a5fa" : enduranceMode ? "#ef4444" : "#facc15" }}>
-          {title}
+        <h1 style={{ ...styles.endTitle, color: won ? "#4ade80" : enduranceMode ? "#ef4444" : "#facc15" }}>
+          {won ? "Deal Closed!" : enduranceMode ? "Endurance Complete" : "Session Ended"}
         </h1>
         <p style={styles.endPersona}>vs. {persona}</p>
         <p style={styles.endExchanges}>{exchanges} exchange{exchanges !== 1 ? "s" : ""}</p>
