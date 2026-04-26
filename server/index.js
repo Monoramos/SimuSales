@@ -413,7 +413,7 @@ function scoreEndurance(exchanges) {
 async function transcribeAudio(audioBuffer) {
   const { toFile } = await import("openai");
   
-  // Send as mp4 — Whisper accepts webm data labeled as mp4
+  // Send as mp4 — Whisper accepts webm data labeled as mp4 was orginally using ffmpeg
   const audioFile = await toFile(audioBuffer, "audio.mp4", {
     type: "audio/mp4",
   });
