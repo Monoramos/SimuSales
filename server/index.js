@@ -1,7 +1,6 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import rateLimit from "express-rate-limit";
 import { WebSocketServer } from "ws";
 import OpenAI from "openai";
 import { textToSpeech } from "./elevenlabs.js";
@@ -23,24 +22,6 @@ const server = app.listen(process.env.PORT || 3001, () =>
 );
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// --- Rate Limiting ---
-// Protects all HTTP endpoints from abuse
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many requests. Please try again later." },
-});
-app.use(limiter);
-
-// Stricter limit on /personas endpoint
-const personasLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 20,
-  message: { error: "Too many requests to /personas." },
-});
 
 // --- Session Limits ---
 const MAX_EXCHANGES = 20; // max exchanges per session before auto-end
@@ -148,7 +129,7 @@ Keep responses short, cutting, and devastating. Never break character. Never cap
 const VALID_PERSONA_KEYS = new Set(Object.keys(PERSONAS));
 
 // --- REST endpoint: persona list ---
-app.get("/personas", personasLimiter, (req, res) => {
+app.get("/personas", (req, res) => {
   const list = Object.entries(PERSONAS).map(([key, p]) => ({
     key,
     name: p.name,
