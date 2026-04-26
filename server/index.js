@@ -421,13 +421,9 @@ async function transcribeAudio(audioBuffer) {
   await writeFile(inputPath, audioBuffer);
 
   await new Promise((resolve, reject) => {
-  exec(`find / -name ffmpeg -type f 2>/dev/null | head -5`, (err, stdout, stderr) => {
-    console.log("ffmpeg search result:", stdout);
-    if (!stdout.trim()) {
-      reject(new Error("ffmpeg not found anywhere on system"));
-      } else {
-      resolve();
-      }
+  exec(`ffmpeg -y -i ${inputPath} ${outputPath}`, (err, stdout, stderr) => {
+    if (err) reject(new Error(stderr));
+    else resolve();
     });
   });
 
