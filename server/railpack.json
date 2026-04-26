@@ -1,5 +1,4 @@
 {
-  "packages": {
-    "ffmpeg": "*"
-  }
+  "buildAptPackages": ["ffmpeg"],
+  "deployAptPackages": ["ffmpeg"]
 }
