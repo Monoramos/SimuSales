@@ -3,10 +3,6 @@ import express from "express";
 import cors from "cors";
 import { WebSocketServer } from "ws";
 import OpenAI from "openai";
-import { exec } from "child_process";
-import { writeFile, readFile, unlink } from "fs/promises";
-import { tmpdir } from "os";
-import { join } from "path";
 import { textToSpeech } from "./elevenlabs.js";
 
 const app = express();
@@ -415,24 +411,12 @@ function scoreEndurance(exchanges) {
 
 // --- OpenAI Whisper: Speech to Text ---
 async function transcribeAudio(audioBuffer) {
-  const inputPath = join(tmpdir(), `input_${Date.now()}.webm`);
-  const outputPath = join(tmpdir(), `output_${Date.now()}.wav`);
-
-  await writeFile(inputPath, audioBuffer);
-
-  await new Promise((resolve, reject) => {
-  exec(`ffmpeg -y -i ${inputPath} ${outputPath}`, (err, stdout, stderr) => {
-    if (err) reject(new Error(stderr));
-    else resolve();
-    });
-  });
-
-  const wavBuffer = await readFile(outputPath);
-  await unlink(inputPath).catch(() => {});
-  await unlink(outputPath).catch(() => {});
-
   const { toFile } = await import("openai");
-  const audioFile = await toFile(wavBuffer, "audio.wav", { type: "audio/wav" });
+  
+  // Send as mp4 — Whisper accepts webm data labeled as mp4
+  const audioFile = await toFile(audioBuffer, "audio.mp4", {
+    type: "audio/mp4",
+  });
 
   const response = await openai.audio.transcriptions.create({
     file: audioFile,
