@@ -27,8 +27,8 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // --- Rate Limiting ---
 // Protects all HTTP endpoints from abuse
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,                  // max 100 requests per IP per window
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests. Please try again later." },
@@ -37,8 +37,8 @@ app.use(limiter);
 
 // Stricter limit on /personas endpoint
 const personasLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 20,             // max 20 requests per IP per minute
+  windowMs: 60 * 1000,
+  limit: 20,
   message: { error: "Too many requests to /personas." },
 });
 
