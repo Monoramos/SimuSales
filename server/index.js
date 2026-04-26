@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { WebSocketServer } from "ws";
 import OpenAI from "openai";
 import { textToSpeech } from "./elevenlabs.js";
@@ -9,11 +10,33 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const server = app.listen(3001, () =>
-  console.log("Server running on port 3001")
+const server = app.listen(process.env.PORT || 3001, () =>
+  console.log(`Server running on port ${process.env.PORT || 3001}`)
 );
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// --- Rate Limiting ---
+// Protects all HTTP endpoints from abuse
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,                  // max 100 requests per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please try again later." },
+});
+app.use(limiter);
+
+// Stricter limit on /personas endpoint
+const personasLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20,             // max 20 requests per IP per minute
+  message: { error: "Too many requests to /personas." },
+});
+
+// --- Session Limits ---
+const MAX_EXCHANGES = 20; // max exchanges per session before auto-end
+const MAX_AUDIO_BYTES = 5 * 1024 * 1024; // 5MB max audio per chunk
 
 // --- Persona System ---
 const PERSONAS = {
@@ -113,8 +136,11 @@ Keep responses short, cutting, and devastating. Never break character. Never cap
   },
 };
 
+// --- Valid persona keys (input validation) ---
+const VALID_PERSONA_KEYS = new Set(Object.keys(PERSONAS));
+
 // --- REST endpoint: persona list ---
-app.get("/personas", (req, res) => {
+app.get("/personas", personasLimiter, (req, res) => {
   const list = Object.entries(PERSONAS).map(([key, p]) => ({
     key,
     name: p.name,
@@ -132,26 +158,13 @@ function createConversationHistory(persona) {
   return [{ role: "system", content: persona.prompt }];
 }
 
-// --- Win Detection Phrases ---
-// If AI response contains any of these, session is won
+// --- Win Detection ---
 const WIN_SIGNALS = [
-  "send me a one-pager",
-  "send me a proposal",
-  "what are the next steps",
-  "next steps",
-  "schedule a",
-  "set up a meeting",
-  "i'd want to validate",
-  "willing to schedule",
-  "formal review",
-  "say that again",
-  "that's actually interesting",
-  "that actually sounds great",
-  "sounds great",
-  "send me a quote",
-  "let's talk more",
-  "tell me more",
-  "you've got my attention",
+  "send me a one-pager", "send me a proposal", "what are the next steps",
+  "next steps", "schedule a", "set up a meeting", "i'd want to validate",
+  "willing to schedule", "formal review", "say that again",
+  "that's actually interesting", "that actually sounds great", "sounds great",
+  "send me a quote", "let's talk more", "tell me more", "you've got my attention",
 ];
 
 function detectWin(aiResponse) {
@@ -162,17 +175,40 @@ function detectWin(aiResponse) {
 // --- WebSocket Server ---
 const wss = new WebSocketServer({ server });
 
-wss.on("connection", (ws, req) => {
-  const url = new URL(req.url, "http://localhost:3001");
-  const personaKey = url.searchParams.get("persona") || "skepticalCTO";
-  const activePersona = PERSONAS[personaKey] || PERSONAS.skepticalCTO;
+// Simple WebSocket rate limiting — track connections per IP
+const ipConnectionCount = new Map();
+const MAX_CONNECTIONS_PER_IP = 5;
 
-  console.log(`Client connected — Persona: ${activePersona.name} | Difficulty: ${activePersona.difficulty}`);
+wss.on("connection", (ws, req) => {
+  // --- IP-based WebSocket rate limiting ---
+  const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  const currentCount = ipConnectionCount.get(ip) || 0;
+
+  if (currentCount >= MAX_CONNECTIONS_PER_IP) {
+    console.warn(`Too many connections from ${ip}, rejecting.`);
+    ws.close(1008, "Too many connections");
+    return;
+  }
+  ipConnectionCount.set(ip, currentCount + 1);
+
+  // --- Persona validation ---
+  const url = new URL(req.url, `http://localhost`);
+  const personaKey = url.searchParams.get("persona") || "";
+
+  if (!VALID_PERSONA_KEYS.has(personaKey)) {
+    console.warn(`Invalid persona key received: "${personaKey}" — defaulting to skepticalCTO`);
+  }
+
+  const activePersona = VALID_PERSONA_KEYS.has(personaKey)
+    ? PERSONAS[personaKey]
+    : PERSONAS.skepticalCTO;
+
+  console.log(`Client connected — Persona: ${activePersona.name} | Difficulty: ${activePersona.difficulty} | IP: ${ip}`);
 
   const conversationHistory = createConversationHistory(activePersona);
   const sessionData = {
-    exchanges: 0,        // total back-and-forth turns
-    transcripts: [],     // all user statements for scoring
+    exchanges: 0,
+    transcripts: [],
     won: false,
     ended: false,
   };
@@ -181,28 +217,32 @@ wss.on("connection", (ws, req) => {
   let silenceTimer = null;
 
   ws.on("message", async (data) => {
-    // Client signals manual exit — score and end
-    if (data.toString() === "END_SESSION") {
+    const dataStr = data.toString();
+
+    // --- END SESSION signal ---
+    if (dataStr === "END_SESSION") {
       if (!sessionData.ended) {
         sessionData.ended = true;
         const score = await scoreSession(sessionData, activePersona);
-        ws.send(JSON.stringify({
-          type: "session_end",
-          result: "exited",
-          persona: activePersona.name,
-          ...score,
-        }));
+        ws.send(JSON.stringify({ type: "session_end", result: "exited", persona: activePersona.name, ...score }));
       }
       return;
     }
 
-    if (data.toString() === "END_OF_SPEECH") {
+    // --- END OF SPEECH signal ---
+    if (dataStr === "END_OF_SPEECH") {
       clearTimeout(silenceTimer);
       if (audioChunks.length > 0) {
         const chunks = [...audioChunks];
         audioChunks = [];
         await processAudio(ws, chunks, conversationHistory, activePersona, sessionData);
       }
+      return;
+    }
+
+    // --- Audio chunk validation ---
+    if (data.byteLength > MAX_AUDIO_BYTES) {
+      console.warn(`Audio chunk too large: ${data.byteLength} bytes — rejecting`);
       return;
     }
 
@@ -219,6 +259,10 @@ wss.on("connection", (ws, req) => {
   });
 
   ws.on("close", () => {
+    // Clean up IP connection count
+    const count = ipConnectionCount.get(ip) || 1;
+    if (count <= 1) ipConnectionCount.delete(ip);
+    else ipConnectionCount.set(ip, count - 1);
     console.log("Client disconnected");
     clearTimeout(silenceTimer);
   });
@@ -234,6 +278,21 @@ wss.on("connection", (ws, req) => {
 async function processAudio(ws, audioChunks, conversationHistory, activePersona, sessionData) {
   if (sessionData.ended) return;
 
+  // --- Session exchange limit ---
+  if (sessionData.exchanges >= MAX_EXCHANGES) {
+    if (!sessionData.ended) {
+      sessionData.ended = true;
+      const score = await scoreSession(sessionData, activePersona);
+      ws.send(JSON.stringify({
+        type: "session_end",
+        result: "limit_reached",
+        persona: activePersona.name,
+        ...score,
+      }));
+    }
+    return;
+  }
+
   try {
     const audioBuffer = Buffer.concat(audioChunks);
 
@@ -247,8 +306,12 @@ async function processAudio(ws, audioChunks, conversationHistory, activePersona,
     sessionData.transcripts.push(transcript);
     sessionData.exchanges++;
 
-    ws.send(JSON.stringify({ type: "transcript", text: transcript }));
+    // Warn client when approaching limit
+    if (sessionData.exchanges === MAX_EXCHANGES - 3) {
+      ws.send(JSON.stringify({ type: "warning", message: "3 exchanges remaining in this session." }));
+    }
 
+    ws.send(JSON.stringify({ type: "transcript", text: transcript }));
     conversationHistory.push({ role: "user", content: transcript });
 
     const [aiResponse, feedback] = await Promise.all([
@@ -270,20 +333,13 @@ async function processAudio(ws, audioChunks, conversationHistory, activePersona,
     const audioData = await textToSpeech(aiResponse, activePersona.voiceId);
     ws.send(audioData);
 
-    // --- Win detection (only for winnable personas) ---
+    // Win detection
     if (activePersona.winnable && detectWin(aiResponse) && !sessionData.ended) {
       sessionData.ended = true;
       sessionData.won = true;
-
-      // Small delay so audio plays before end screen
       setTimeout(async () => {
         const score = await scoreSession(sessionData, activePersona);
-        ws.send(JSON.stringify({
-          type: "session_end",
-          result: "won",
-          persona: activePersona.name,
-          ...score,
-        }));
+        ws.send(JSON.stringify({ type: "session_end", result: "won", persona: activePersona.name, ...score }));
       }, 3000);
     }
   } catch (err) {
@@ -292,128 +348,10 @@ async function processAudio(ws, audioChunks, conversationHistory, activePersona,
   }
 }
 
-// --- Scoring Engine ---
-async function scoreSession(sessionData, activePersona) {
-  const { transcripts, exchanges, won } = sessionData;
-
-  if (transcripts.length === 0) {
-    return {
-      overall: 0,
-      breakdown: {
-        objectionHandling: 0,
-        questionQuality: 0,
-        conciseness: 0,
-        adaptability: 0,
-      },
-      summary: "No exchanges to score.",
-      exchanges,
-    };
-  }
-
-  // The Wall uses endurance scoring
-  if (!activePersona.winnable) {
-    return scoreEndurance(exchanges);
-  }
-
-  const fullConversation = transcripts.join("\n");
-
-  const scoringPrompt = `You are an expert sales coach scoring a completed sales training session.
-
-Persona faced: ${activePersona.name} (${activePersona.difficulty} difficulty)
-Result: ${won ? "Won — prospect agreed to next steps" : "Exited early"}
-Total exchanges: ${exchanges}
-
-Sales rep's statements (in order):
-${transcripts.map((t, i) => `${i + 1}. "${t}"`).join("\n")}
-
-Score the sales rep across these 4 categories, each out of 25 points:
-
-1. Objection Handling (25pts) — Did they address pushback directly and effectively?
-2. Question Quality (25pts) — Did they ask smart discovery questions?
-3. Conciseness (25pts) — Did they stay tight and focused, or ramble?
-4. Adaptability (25pts) — Did they adjust their approach when the prospect pushed back?
-
-Also write a 2-sentence coaching summary — what they did well and one thing to improve.
-
-Return ONLY raw JSON, no markdown, no code fences:
-{
-  "objectionHandling": <0-25>,
-  "questionQuality": <0-25>,
-  "conciseness": <0-25>,
-  "adaptability": <0-25>,
-  "summary": "two sentence coaching summary here"
-}`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: scoringPrompt }],
-      max_tokens: 200,
-      temperature: 0.3,
-    });
-
-    const raw = response.choices[0].message.content
-      .trim()
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/```\s*$/i, "");
-
-    const parsed = JSON.parse(raw);
-    const overall = parsed.objectionHandling + parsed.questionQuality +
-                    parsed.conciseness + parsed.adaptability;
-
-    return {
-      overall,
-      breakdown: {
-        objectionHandling: parsed.objectionHandling,
-        questionQuality: parsed.questionQuality,
-        conciseness: parsed.conciseness,
-        adaptability: parsed.adaptability,
-      },
-      summary: parsed.summary,
-      exchanges,
-    };
-  } catch (err) {
-    console.error("Scoring error:", err);
-    return {
-      overall: 0,
-      breakdown: { objectionHandling: 0, questionQuality: 0, conciseness: 0, adaptability: 0 },
-      summary: "Scoring unavailable.",
-      exchanges,
-    };
-  }
-}
-
-// --- Endurance Scoring for The Wall ---
-function scoreEndurance(exchanges) {
-  // Score based on exchanges survived — max 100 at 20+ exchanges
-  const enduranceScore = Math.min(100, Math.round((exchanges / 20) * 100));
-  const tier =
-    exchanges >= 20 ? "Elite — you outlasted The Wall." :
-    exchanges >= 15 ? "Strong — very few last this long." :
-    exchanges >= 10 ? "Solid — you held your ground." :
-    exchanges >= 5  ? "Getting there — keep pushing." :
-                      "Early exit — The Wall wins this round.";
-
-  return {
-    overall: enduranceScore,
-    breakdown: {
-      objectionHandling: Math.min(25, Math.round((exchanges / 20) * 25)),
-      questionQuality: Math.min(25, Math.round((exchanges / 20) * 25)),
-      conciseness: Math.min(25, Math.round((exchanges / 20) * 25)),
-      adaptability: Math.min(25, Math.round((exchanges / 20) * 25)),
-    },
-    summary: `${tier} You survived ${exchanges} exchange${exchanges !== 1 ? "s" : ""} against The Wall.`,
-    exchanges,
-    enduranceMode: true,
-  };
-}
-
 // --- OpenAI Whisper: Speech to Text ---
 async function transcribeAudio(audioBuffer) {
   const { toFile } = await import("openai");
-  
-  // Send as mp4 — Whisper accepts webm data labeled as mp4 was orginally using ffmpeg
+
   const audioFile = await toFile(audioBuffer, "audio.mp4", {
     type: "audio/mp4",
   });
@@ -490,4 +428,109 @@ If the statement is genuinely solid with no issues, return praise. Always return
     console.error("Feedback parsing error:", err);
     return null;
   }
+}
+
+// --- Scoring Engine ---
+async function scoreSession(sessionData, activePersona) {
+  const { transcripts, exchanges, won } = sessionData;
+
+  if (transcripts.length === 0) {
+    return {
+      overall: 0,
+      breakdown: { objectionHandling: 0, questionQuality: 0, conciseness: 0, adaptability: 0 },
+      summary: "No exchanges to score.",
+      exchanges,
+    };
+  }
+
+  if (!activePersona.winnable) {
+    return scoreEndurance(exchanges);
+  }
+
+  const scoringPrompt = `You are an expert sales coach scoring a completed sales training session.
+
+Persona faced: ${activePersona.name} (${activePersona.difficulty} difficulty)
+Result: ${won ? "Won — prospect agreed to next steps" : "Exited early"}
+Total exchanges: ${exchanges}
+
+Sales rep's statements (in order):
+${transcripts.map((t, i) => `${i + 1}. "${t}"`).join("\n")}
+
+Score the sales rep across these 4 categories, each out of 25 points:
+1. Objection Handling (25pts)
+2. Question Quality (25pts)
+3. Conciseness (25pts)
+4. Adaptability (25pts)
+
+Return ONLY raw JSON, no markdown, no code fences:
+{
+  "objectionHandling": <0-25>,
+  "questionQuality": <0-25>,
+  "conciseness": <0-25>,
+  "adaptability": <0-25>,
+  "summary": "two sentence coaching summary here"
+}`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: scoringPrompt }],
+      max_tokens: 200,
+      temperature: 0.3,
+    });
+
+    const raw = response.choices[0].message.content
+      .trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "");
+
+    const parsed = JSON.parse(raw);
+    const overall = parsed.objectionHandling + parsed.questionQuality +
+                    parsed.conciseness + parsed.adaptability;
+
+    return {
+      overall,
+      breakdown: {
+        objectionHandling: parsed.objectionHandling,
+        questionQuality: parsed.questionQuality,
+        conciseness: parsed.conciseness,
+        adaptability: parsed.adaptability,
+      },
+      summary: parsed.summary,
+      exchanges,
+    };
+  } catch (err) {
+    console.error("Scoring error:", err);
+    return {
+      overall: 0,
+      breakdown: { objectionHandling: 0, questionQuality: 0, conciseness: 0, adaptability: 0 },
+      summary: "Scoring unavailable.",
+      exchanges,
+    };
+  }
+}
+
+// --- Endurance Scoring for The Wall ---
+function scoreEndurance(exchanges) {
+  const enduranceScore = Math.min(100, Math.round((exchanges / 20) * 100));
+  const tier =
+    exchanges >= 20 ? "Elite — you outlasted The Wall." :
+    exchanges >= 15 ? "Strong — very few last this long." :
+    exchanges >= 10 ? "Solid — you held your ground." :
+    exchanges >= 5  ? "Getting there — keep pushing." :
+                      "Early exit — The Wall wins this round.";
+
+  return {
+    overall: enduranceScore,
+    breakdown: {
+      objectionHandling: Math.min(25, Math.round((exchanges / 20) * 25)),
+      questionQuality: Math.min(25, Math.round((exchanges / 20) * 25)),
+      conciseness: Math.min(25, Math.round((exchanges / 20) * 25)),
+      adaptability: Math.min(25, Math.round((exchanges / 20) * 25)),
+    },
+    summary: `${tier} You survived ${exchanges} exchange${exchanges !== 1 ? "s" : ""} against The Wall.`,
+    exchanges,
+    enduranceMode: true,
+  };
 }
