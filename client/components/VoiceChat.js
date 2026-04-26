@@ -17,7 +17,7 @@ function PersonaSelector({ onSelect }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://localhost:3001/personas")
+    fetch("https://simusales-production.up.railway.app/personas")
       .then((r) => r.json())
       .then((data) => { setPersonas(data); setLoading(false); })
       .catch(() => setLoading(false));

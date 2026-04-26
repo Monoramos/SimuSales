@@ -1,7 +1,7 @@
 // Reusable WebSocket connection manager
 
 export function createSocket({ personaKey, onTranscript, onAIText, onAudio, onFeedback, onSessionEnd, onError }) {
-  const socket = new WebSocket(`ws://localhost:3001?persona=${personaKey}`);
+  const socket = new WebSocket(`wss://simusales-production.up.railway.app?persona=${personaKey}`);
   socket.binaryType = "arraybuffer";
 
   socket.onopen = () => {
