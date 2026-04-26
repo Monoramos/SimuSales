@@ -1,10 +1,18 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import rateLimit from "express-rate-limit";
+//import rateLimit from "express-rate-limit";
 import { WebSocketServer } from "ws";
 import OpenAI from "openai";
 import { textToSpeech } from "./elevenlabs.js";
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled rejection:", err);
+});
 
 const app = express();
 app.use(cors());
