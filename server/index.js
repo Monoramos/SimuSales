@@ -116,6 +116,9 @@ Keep responses short, cutting, and devastating. Never break character. Never cap
   },
 };
 
+// --- Valid persona keys (input validation) ---
+const VALID_PERSONA_KEYS = new Set(Object.keys(PERSONAS));
+
 // --- REST endpoint: persona list ---
 app.get("/personas", (req, res) => {
   const list = Object.entries(PERSONAS).map(([key, p]) => ({
@@ -167,8 +170,15 @@ const wss = new WebSocketServer({ server });
 
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, "http://localhost:3001");
-  const personaKey = url.searchParams.get("persona") || "skepticalCTO";
-  const activePersona = PERSONAS[personaKey] || PERSONAS.skepticalCTO;
+  const personaKey = url.searchParams.get("persona") || "";
+
+  if (!VALID_PERSONA_KEYS.has(personaKey)) {
+    console.warn(`Invalid persona key received: "${personaKey}" — defaulting to skepticalCTO`);
+  }
+
+  const activePersona = VALID_PERSONA_KEYS.has(personaKey)
+    ? PERSONAS[personaKey]
+    : PERSONAS.skepticalCTO;
 
   console.log(`Client connected — Persona: ${activePersona.name} | Difficulty: ${activePersona.difficulty}`);
 
