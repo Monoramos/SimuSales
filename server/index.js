@@ -262,6 +262,7 @@ wss.on("connection", (ws, req) => {
 
 // --- Core Pipeline ---
 async function processAudio(ws, audioChunks, conversationHistory, activePersona, sessionData) {
+  console.log(`processAudio called — exchanges: ${sessionData.exchanges}, ended: ${sessionData.ended}`);
   if (sessionData.ended) return;
 
   if (sessionData.exchanges >= MAX_EXCHANGES) {
