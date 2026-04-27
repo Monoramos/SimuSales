@@ -15,6 +15,9 @@ const server = app.listen(3001, () =>
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// --- Session Limits ---
+const MAX_EXCHANGES = 20;
+
 // --- Persona System ---
 const PERSONAS = {
   friendlyFrank: {
@@ -233,6 +236,18 @@ wss.on("connection", (ws, req) => {
 // --- Core Pipeline ---
 async function processAudio(ws, audioChunks, conversationHistory, activePersona, sessionData) {
   if (sessionData.ended) return;
+
+  if (sessionData.exchanges >= MAX_EXCHANGES) {
+    sessionData.ended = true;
+    const score = await scoreSession(sessionData, activePersona);
+    ws.send(JSON.stringify({
+      type: "session_end",
+      result: "limit_reached",
+      persona: activePersona.name,
+      ...score,
+    }));
+    return;
+  }
 
   try {
     const audioBuffer = Buffer.concat(audioChunks);
