@@ -212,7 +212,7 @@ wss.on("connection", (ws, req) => {
   let silenceTimer = null;
 
   ws.on("message", async (data) => {
-
+    const dataStr = data.toString();
     if (dataStr === "INTERRUPT") {
       audioChunks = [];
       clearTimeout(silenceTimer);
