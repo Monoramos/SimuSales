@@ -51,5 +51,9 @@ export function createSocket({ personaKey, onTranscript, onAIText, onAudio, onFe
     if (socket.readyState === WebSocket.OPEN) socket.send("END_SESSION");
   };
 
+  socket.sendInterrupt = () => {
+  if (socket.readyState === WebSocket.OPEN) socket.send("INTERRUPT");
+  };  
+
   return socket;
 }

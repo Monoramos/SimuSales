@@ -152,6 +152,7 @@ function CallScreen({ persona, onExit, onSessionEnd }) {
   const isAITalkingRef = useRef(false);
   const isRecordingRef = useRef(false);
   const feedbackTimerRef = useRef(null);
+  const currentAudioSourceRef = useRef(null);
 
   const [status, setStatus] = useState("connecting");
   const [transcript, setTranscript] = useState("");
@@ -233,7 +234,8 @@ function CallScreen({ persona, onExit, onSessionEnd }) {
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
-      source.onended = () => { isAITalkingRef.current = false; setStatus("ready"); };
+      source.onended = () => { isAITalkingRef.current = false; currentAudioSourceRef.current = null; setStatus("ready"); };
+      currentAudioSourceRef.current = source;
       source.start();
     } catch (err) {
       console.error("Audio playback error:", err);
@@ -273,7 +275,18 @@ function CallScreen({ persona, onExit, onSessionEnd }) {
       </div>
 
       <button
-        onMouseDown={() => { isRecordingRef.current = true; setStatus("listening"); }}
+        onMouseDown={() => { 
+          if (isAITalkingRef.current) {
+            try {
+              currentAudioSourceRef.current?.stop();
+            }catch (e) {}
+            isAITalkingRef.current = false;
+            socketRef.current?.sendInterrupt();
+          }
+          isRecordingRef.current = true;
+          setStatus("listening");
+            }
+          }
         onMouseUp={() => { isRecordingRef.current = false; socketRef.current?.sendEndOfSpeech(); setStatus("ready"); }}
         onMouseLeave={() => {
           if (isRecordingRef.current) {
@@ -282,11 +295,11 @@ function CallScreen({ persona, onExit, onSessionEnd }) {
             setStatus("ready");
           }
         }}
-        disabled={status === "ai_talking" || status === "connecting"}
+        disabled={status === "connecting"}
         style={{
           ...styles.button,
-          opacity: status === "ai_talking" || status === "connecting" ? 0.4 : 1,
-          cursor: status === "ai_talking" || status === "connecting" ? "not-allowed" : "pointer",
+          opacity: status === "connecting" ? 0.4 : 1,
+          cursor: status === "connecting" ? "not-allowed" : "pointer",
         }}
       >
         🎤 Hold to Speak

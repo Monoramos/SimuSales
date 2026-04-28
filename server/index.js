@@ -205,12 +205,21 @@ wss.on("connection", (ws, req) => {
     transcripts: [],     // all user statements for scoring
     won: false,
     ended: false,
+    token: 0,
   };
 
   let audioChunks = [];
   let silenceTimer = null;
 
   ws.on("message", async (data) => {
+
+    if (dataStr === "INTERRUPT") {
+      audioChunks = [];
+      clearTimeout(silenceTimer);
+      sessionData.token++;
+      console.log("⚡ Interrupted by user");
+      return;
+    }
     // Client signals manual exit — score and end
     if (data.toString() === "END_SESSION") {
       if (!sessionData.ended) {
@@ -263,6 +272,7 @@ wss.on("connection", (ws, req) => {
 // --- Core Pipeline ---
 async function processAudio(ws, audioChunks, conversationHistory, activePersona, sessionData) {
   console.log(`processAudio called — exchanges: ${sessionData.exchanges}, ended: ${sessionData.ended}`);
+  const exchangeToken = sessionData.token; // snapshot token at start
   if (sessionData.ended) return;
 
   if (sessionData.exchanges >= MAX_EXCHANGES) {
@@ -290,6 +300,7 @@ async function processAudio(ws, audioChunks, conversationHistory, activePersona,
     sessionData.transcripts.push(transcript);
     sessionData.exchanges++;
 
+    if (sessionData.token !== exchangeToken) return; // interrupted
     ws.send(JSON.stringify({ type: "transcript", text: transcript }));
 
     conversationHistory.push({ role: "user", content: transcript });
@@ -304,6 +315,7 @@ async function processAudio(ws, audioChunks, conversationHistory, activePersona,
 
     conversationHistory.push({ role: "assistant", content: aiResponse });
 
+    if (sessionData.token !== exchangeToken) return; // interrupted
     ws.send(JSON.stringify({ type: "ai_text", text: aiResponse }));
 
     if (feedback) {
@@ -311,6 +323,7 @@ async function processAudio(ws, audioChunks, conversationHistory, activePersona,
     }
 
     const audioData = await textToSpeech(aiResponse, activePersona.voiceId);
+    if (sessionData.token !== exchangeToken) return; // interrupted
     ws.send(audioData);
 
     // --- Win detection (only for winnable personas) ---
