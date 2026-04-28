@@ -210,7 +210,7 @@ function CallScreen({ persona, onExit, onSessionEnd }) {
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size === 0) return;
         if (!headerChunk) { headerChunk = event.data; return; }
-        if (isRecordingRef.current && !isAITalkingRef.current) {
+        if (isRecordingRef.current) {
           socketRef.current?.sendAudio(headerChunk);
           socketRef.current?.sendAudio(event.data);
         }
