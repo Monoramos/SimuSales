@@ -10,7 +10,7 @@ const DIFFICULTY_CONFIG = {
   unwinnable: { label: "Unwinnable", color: "#7C3AED", bg: "rgba(124, 58, 237, 0.08)" },
 };
 
-// ─── Persona Selector ─────────────────────────────────────────────────────────
+// ─── Persona Selector ─────
 function PersonaSelector({ onSelect }) {
   const [personas, setPersonas] = useState([]);
   const [hovered, setHovered] = useState(null);
@@ -76,7 +76,7 @@ function PersonaSelector({ onSelect }) {
   );
 }
 
-// ─── End Screen ───────────────────────────────────────────────────────────────
+// ─── End Screen ────
 function EndScreen({ result, onTryAgain, onChangeProspect }) {
   const { outcome, persona, overall, breakdown, summary, exchanges, enduranceMode } = result;
   const won = outcome === "won";
@@ -144,7 +144,7 @@ function EndScreen({ result, onTryAgain, onChangeProspect }) {
   );
 }
 
-// ─── Call Screen ──────────────────────────────────────────────────────────────
+// ─── Call Screen ─────
 function CallScreen({ persona, onExit, onSessionEnd }) {
   const socketRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -295,11 +295,32 @@ function CallScreen({ persona, onExit, onSessionEnd }) {
             setStatus("ready");
           }
         }}
+        onTouchStart={(e) => {
+          e.preventDefault();
+          if (isAITalkingRef.current) {
+            try {
+              currentAudioSourceRef.current?.stop();
+            }catch (e) {}
+            isAITalkingRef.current = false;
+            socketRef.current?.sendInterrupt();
+          }
+          isRecordingRef.current = true;
+          setStatus("listening");
+        }}
+        onTouchEnd={(e) => {
+          e.preventDefault();
+          isRecordingRef.current = false;
+          socketRef.current?.sendEndOfSpeech();
+        setStatus("ready");
+      }}
         disabled={status === "connecting"}
         style={{
           ...styles.button,
           opacity: status === "connecting" ? 0.4 : 1,
           cursor: status === "connecting" ? "not-allowed" : "pointer",
+          WebkitUserSelect: "none",
+          userSelect: "none",
+          touchAction: "none",
         }}
       >
         🎤 Hold to Speak
@@ -337,7 +358,7 @@ function CallScreen({ persona, onExit, onSessionEnd }) {
   );
 }
 
-// ─── Root Component ───────────────────────────────────────────────────────────
+// ─── Root Component ─────
 export default function VoiceChat() {
   const [screen, setScreen] = useState("selector");
   const [selectedPersona, setSelectedPersona] = useState(null);
@@ -385,7 +406,7 @@ export default function VoiceChat() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles ────
 const styles = {
   fullCenter: {
     display: "flex", alignItems: "center", justifyContent: "center",
